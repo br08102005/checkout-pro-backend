@@ -39,9 +39,7 @@ const { data, error } = await supabase
   .single();
 
 if (error) {
-  return res.status(500).json({
-    error: error.message
-  });
+  return res.status(500).json({ error: error.message });
 }
 
 return res.json({
@@ -52,9 +50,7 @@ return res.json({
 ```
 
 } catch (err) {
-return res.status(500).json({
-error: err.message
-});
+return res.status(500).json({ error: err.message });
 }
 });
 
@@ -70,9 +66,7 @@ const { data, error } = await supabase
 
 ```
 if (error) {
-  return res.status(500).json({
-    error: error.message
-  });
+  return res.status(500).json({ error: error.message });
 }
 
 return res.json({
@@ -81,9 +75,7 @@ return res.json({
 ```
 
 } catch (err) {
-return res.status(500).json({
-error: err.message
-});
+return res.status(500).json({ error: err.message });
 }
 });
 
