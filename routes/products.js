@@ -1,19 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const supabase = require("../config/supabase");
+const { supabase } = require("../services/supabaseService");
 
-/* -------------------------
+/* =========================
    CRIAR PRODUTO
---------------------------*/
+========================= */
 router.post("/create", async (req, res) => {
   try {
-    const {
-      name,
-      price,
-      image,
-      description = "",
-      extras = []
-    } = req.body;
+    const { name, price, image, description = "", extras = [] } = req.body;
 
     if (!name || !price) {
       return res.status(400).json({
@@ -23,6 +17,7 @@ router.post("/create", async (req, res) => {
 
     const slug = name
       .toLowerCase()
+      .trim()
       .replace(/\s+/g, "-")
       .replace(/[^a-z0-9-]/g, "");
 
@@ -33,7 +28,7 @@ router.post("/create", async (req, res) => {
           name,
           slug,
           price: Number(price),
-          image,
+          image: image || null,
           description,
           extras,
           active: true
@@ -43,7 +38,9 @@ router.post("/create", async (req, res) => {
       .single();
 
     if (error) {
-      return res.status(500).json({ error: error.message });
+      return res.status(500).json({
+        error: error.message
+      });
     }
 
     return res.json({
@@ -53,13 +50,15 @@ router.post("/create", async (req, res) => {
     });
 
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({
+      error: err.message
+    });
   }
 });
 
-/* -------------------------
+/* =========================
    LISTAR PRODUTOS
---------------------------*/
+========================= */
 router.get("/", async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -68,13 +67,19 @@ router.get("/", async (req, res) => {
       .order("created_at", { ascending: false });
 
     if (error) {
-      return res.status(500).json({ error: error.message });
+      return res.status(500).json({
+        error: error.message
+      });
     }
 
-    return res.json({ products: data });
+    return res.json({
+      products: data || []
+    });
 
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({
+      error: err.message
+    });
   }
 });
 

@@ -8,7 +8,7 @@ const app = express();
    SECURITY / BASE MIDDLEWARES
 ========================================= */
 app.use(cors({
-  origin: "*", // em produção troca para o teu domínio
+  origin: "*",
   methods: ["GET", "POST", "PUT", "DELETE"],
 }));
 
@@ -26,40 +26,50 @@ app.get("/", (req, res) => {
 });
 
 /* =========================================
+   SAFE ROUTE LOADER (EVITA CRASH TOTAL)
+========================================= */
+function safeRoute(path, file) {
+  try {
+    app.use(path, require(file));
+    console.log(`✅ Route loaded: ${path}`);
+  } catch (err) {
+    console.error(`❌ Failed to load route ${path}:`, err.message);
+  }
+}
+
+/* =========================================
    ROUTES CORE
 ========================================= */
-app.use("/api/products", require("./routes/products"));
-app.use("/api/checkout", require("./routes/checkout"));
-app.use("/api/orders", require("./routes/orders"));
-app.use("/api/payment", require("./routes/payment"));
-
-/* 🔥 AUTH ROUTES (FALTAVA ISTO) */
-app.use("/api/auth", require("./routes/auth"));
-
-/* DASHBOARD */
-app.use("/api/dashboard", require("./routes/dashboard"));
-
-/* TRACKING (FUNNEL) */
-app.use("/api/tracking", require("./routes/tracking"));
+safeRoute("/api/products", "./routes/products");
+safeRoute("/api/checkout", "./routes/checkout");
+safeRoute("/api/orders", "./routes/orders");
+safeRoute("/api/payment", "./routes/payment");
+safeRoute("/api/auth", "./routes/auth");
+safeRoute("/api/dashboard", "./routes/dashboard");
+safeRoute("/api/tracking", "./routes/tracking");
 
 /* =========================================
    ORDER EXPIRATION SYSTEM
-   (10 min rule - core business logic)
 ========================================= */
-const { expireOldOrders } = require("./services/orderService");
+let expireOldOrders = null;
+
+try {
+  ({ expireOldOrders } = require("./services/orderService"));
+} catch (err) {
+  console.error("❌ orderService failed to load:", err.message);
+}
 
 async function runExpirationJob() {
   try {
-    await expireOldOrders();
+    if (typeof expireOldOrders === "function") {
+      await expireOldOrders();
+    }
   } catch (err) {
     console.error("❌ Erro ao expirar orders:", err.message);
   }
 }
 
-/* roda a cada 60 segundos */
 setInterval(runExpirationJob, 60 * 1000);
-
-/* execução inicial */
 runExpirationJob();
 
 /* =========================================
