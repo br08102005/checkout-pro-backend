@@ -1,101 +1,115 @@
 const express = require("express");
 const router = express.Router();
-const { supabase } = require("../services/supabaseService");
+const supabase = require("../config/supabase");
 
 /* =========================
-   GET ORDER BY ID
+GET ORDER BY ID
 ========================= */
 router.get("/orders/:id", async (req, res) => {
-  try {
-    const orderId = req.params.id;
+try {
+const orderId = req.params.id;
 
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*")
-      .eq("id", orderId)
-      .single();
+```
+const { data, error } = await supabase
+  .from("orders")
+  .select("*")
+  .eq("id", orderId)
+  .single();
 
-    if (error) {
-      return res.status(404).json({
-        error: "Order not found"
-      });
-    }
+if (error) {
+  return res.status(404).json({
+    error: "Order not found"
+  });
+}
 
-    return res.json({
-      order: data
-    });
+return res.json({
+  order: data
+});
+```
 
-  } catch (err) {
-    return res.status(500).json({
-      error: err.message
-    });
-  }
+} catch (err) {
+return res.status(500).json({
+error: err.message
+});
+}
 });
 
 /* =========================
-   TRACK PAYMENT ACTIVITY
+TRACK PAYMENT ACTIVITY
 ========================= */
 router.post("/orders/:id/activity", async (req, res) => {
-  try {
-    const orderId = req.params.id;
-    const { event } = req.body;
+try {
+const orderId = req.params.id;
+const { event } = req.body;
 
-    const { data, error } = await supabase
-      .from("order_activity")
-      .insert([
-        {
-          order_id: orderId,
-          event,
-          created_at: new Date().toISOString()
-        }
-      ]);
-
-    if (error) {
-      return res.status(400).json({
-        error: error.message
-      });
+```
+const { data, error } = await supabase
+  .from("order_activity")
+  .insert([
+    {
+      order_id: orderId,
+      event,
+      created_at: new Date().toISOString()
     }
+  ]);
 
-    return res.json({
-      success: true,
-      data
-    });
+if (error) {
+  return res.status(400).json({
+    error: error.message
+  });
+}
 
-  } catch (err) {
-    return res.status(500).json({
-      error: err.message
-    });
-  }
+return res.json({
+  success: true,
+  data
+});
+```
+
+} catch (err) {
+return res.status(500).json({
+error: err.message
+});
+}
 });
 
 /* =========================
-   CONFIRM PAYMENT (OPTIONAL)
+CONFIRM PAYMENT
 ========================= */
 router.post("/confirm", async (req, res) => {
-  try {
-    const { orderId } = req.body;
+try {
+const { orderId } = req.body;
 
-    const { data, error } = await supabase
-      .from("orders")
-      .update({ status: "paid" })
-      .eq("id", orderId);
+```
+if (!orderId) {
+  return res.status(400).json({
+    error: "orderId é obrigatório"
+  });
+}
 
-    if (error) {
-      return res.status(400).json({
-        error: error.message
-      });
-    }
+const { error } = await supabase
+  .from("orders")
+  .update({
+    status: "paid"
+  })
+  .eq("id", orderId);
 
-    return res.json({
-      success: true,
-      message: "Payment confirmed"
-    });
+if (error) {
+  return res.status(400).json({
+    error: error.message
+  });
+}
 
-  } catch (err) {
-    return res.status(500).json({
-      error: err.message
-    });
-  }
+return res.json({
+  success: true,
+  message: "Payment confirmed"
+});
+```
+
+} catch (err) {
+return res.status(500).json({
+error: err.message
+});
+}
 });
 
 module.exports = router;
