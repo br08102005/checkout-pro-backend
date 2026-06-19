@@ -5,13 +5,19 @@ function requireAdmin(req, res, next) {
     const authHeader = req.headers.authorization;
 
     if (!authHeader) {
-      return res.status(401).json({ error: "Token não fornecido" });
+      return res.status(401).json({
+        success: false,
+        error: "Token não fornecido"
+      });
     }
 
     const token = authHeader.split(" ")[1];
 
     if (!token) {
-      return res.status(401).json({ error: "Token inválido" });
+      return res.status(401).json({
+        success: false,
+        error: "Token inválido"
+      });
     }
 
     const decoded = jwt.verify(
@@ -19,9 +25,11 @@ function requireAdmin(req, res, next) {
       process.env.JWT_SECRET
     );
 
-    // Verificar se o utilizador tem role de admin
     if (decoded.role !== "admin") {
-      return res.status(403).json({ error: "Acesso negado. Permissões insuficientes." });
+      return res.status(403).json({
+        success: false,
+        error: "Acesso negado. Permissões insuficientes."
+      });
     }
 
     req.admin = decoded;
@@ -29,8 +37,13 @@ function requireAdmin(req, res, next) {
     next();
 
   } catch (err) {
-    return res.status(401).json({ error: "Acesso negado / Token inválido" });
+    return res.status(401).json({
+      success: false,
+      error: "Acesso negado / Token inválido"
+    });
   }
 }
 
-module.exports = { requireAdmin };
+module.exports = {
+  requireAdmin
+};
