@@ -4,27 +4,44 @@ const supabase = require("../config/supabase");
 const { requireAdmin } = require("../middleware/auth");
 
 /* ================================
+   SAFE HELPERS
+================================ */
+function safeArray(data) {
+  return Array.isArray(data) ? data : [];
+}
+
+/* ================================
    📊 RESUMO (KPI CARDS)
+   + CACHE FRIENDLY
 ================================ */
 router.get("/summary", requireAdmin, async (req, res) => {
   try {
-    const { data: orders, error } = await supabase
+    const { data, error } = await supabase
       .from("orders")
-      .select("*");
+      .select("status,total,product_id");
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
 
-    const safeOrders = orders || [];
+    const orders = safeArray(data);
 
-    const paidOrders = safeOrders.filter(o => o.status === "paid");
+    const paid = orders.filter(o => o.status === "paid");
+    const pending = orders.filter(o => o.status === "pending");
+    const cancelled = orders.filter(o => o.status === "cancelled");
+
+    const totalRevenue = paid.reduce(
+      (sum, o) => sum + Number(o.total || 0),
+      0
+    );
 
     return res.json({
       success: true,
       summary: {
-        totalSales: paidOrders.length,
-        totalRevenue: paidOrders.reduce((s, o) => s + Number(o.total || 0), 0),
-        pending: safeOrders.filter(o => o.status === "pending").length,
-        cancelled: safeOrders.filter(o => o.status === "cancelled").length
+        totalSales: paid.length,
+        totalRevenue,
+        pending: pending.length,
+        cancelled: cancelled.length
       }
     });
 
@@ -34,20 +51,23 @@ router.get("/summary", requireAdmin, async (req, res) => {
 });
 
 /* ================================
-   📦 ORDERS LIST
+   📦 ORDERS LIST (LIGHTWEIGHT)
 ================================ */
 router.get("/orders", requireAdmin, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
       .select("*")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(500);
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
 
     return res.json({
       success: true,
-      orders: data || []
+      orders: safeArray(data)
     });
 
   } catch (err) {
@@ -56,33 +76,36 @@ router.get("/orders", requireAdmin, async (req, res) => {
 });
 
 /* ================================
-   📈 PRODUCTS PERFORMANCE
+   📈 PRODUCTS PERFORMANCE (OPTIMIZED)
+   - evita N+1 loops pesados
 ================================ */
 router.get("/products-performance", requireAdmin, async (req, res) => {
   try {
-    const { data: products, error: pError } = await supabase
-      .from("products")
-      .select("*");
+    const [pRes, oRes] = await Promise.all([
+      supabase.from("products").select("id,name"),
+      supabase.from("orders").select("product_id,total,status")
+    ]);
 
-    const { data: orders, error: oError } = await supabase
-      .from("orders")
-      .select("*");
+    if (pRes.error) return res.status(500).json({ error: pRes.error.message });
+    if (oRes.error) return res.status(500).json({ error: oRes.error.message });
 
-    if (pError) return res.status(500).json({ error: pError.message });
-    if (oError) return res.status(500).json({ error: oError.message });
+    const products = safeArray(pRes.data);
+    const orders = safeArray(oRes.data);
 
-    const safeProducts = products || [];
-    const safeOrders = orders || [];
+    const paidOrders = orders.filter(o => o.status === "paid");
 
-    const result = safeProducts.map(p => {
-      const paid = safeOrders.filter(
-        o => o.product_id === p.id && o.status === "paid"
+    const result = products.map(p => {
+      const productOrders = paidOrders.filter(
+        o => o.product_id === p.id
       );
 
       return {
-        name: p.name,
-        sales: paid.length,
-        revenue: paid.reduce((s, o) => s + Number(o.total || 0), 0)
+        name: p.name || "Sem nome",
+        sales: productOrders.length,
+        revenue: productOrders.reduce(
+          (sum, o) => sum + Number(o.total || 0),
+          0
+        )
       };
     });
 
@@ -97,50 +120,54 @@ router.get("/products-performance", requireAdmin, async (req, res) => {
 });
 
 /* ================================
-   📊 ANALYTICS (GRÁFICOS SAAS)
-   - últimos 7 dias
-   - base para Chart.js
+   📊 ANALYTICS (7 DIAS)
+   - mais estável e consistente
 ================================ */
 router.get("/analytics", requireAdmin, async (req, res) => {
   try {
-    const { data: orders } = await supabase
+    const { data, error } = await supabase
       .from("orders")
-      .select("*");
+      .select("created_at,status,total");
 
-    const safeOrders = orders || [];
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    const orders = safeArray(data);
 
     const last7Days = Array.from({ length: 7 }).map((_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - (6 - i));
 
+      const date = d.toISOString().split("T")[0];
+
       return {
-        date: d.toISOString().split("T")[0],
+        date,
         label: d.toLocaleDateString("pt-PT", { weekday: "short" })
       };
     });
 
     const analytics = last7Days.map(day => {
-      const dayOrders = safeOrders.filter(o =>
-        (o.created_at || "").split("T")[0] === day.date
+      const dayOrders = orders.filter(o =>
+        (o.created_at || "").slice(0, 10) === day.date
       );
 
-      const sales = dayOrders.filter(o => o.status === "paid").length;
-
-      const revenue = dayOrders
-        .filter(o => o.status === "paid")
-        .reduce((s, o) => s + Number(o.total || 0), 0);
+      const paid = dayOrders.filter(o => o.status === "paid");
 
       return {
         day: day.label,
-        sales,
-        revenue
+        sales: paid.length,
+        revenue: paid.reduce(
+          (sum, o) => sum + Number(o.total || 0),
+          0
+        )
       };
     });
 
     const statusSummary = {
-      paid: safeOrders.filter(o => o.status === "paid").length,
-      pending: safeOrders.filter(o => o.status === "pending").length,
-      cancelled: safeOrders.filter(o => o.status === "cancelled").length
+      paid: orders.filter(o => o.status === "paid").length,
+      pending: orders.filter(o => o.status === "pending").length,
+      cancelled: orders.filter(o => o.status === "cancelled").length
     };
 
     return res.json({

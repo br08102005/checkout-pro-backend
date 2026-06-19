@@ -1,76 +1,100 @@
 const express = require("express");
 const router = express.Router();
 const supabase = require("../config/supabase");
-const { requireAdmin } = require("../middleware/auth");
 
 /* =========================================
-   GET FUNNEL BY PRODUCT
-========================================= */
+   GET FULL FUNNEL (DIRECT PRODUCTS QUERY)
+   ========================================= */
 router.get("/:product_id", async (req, res) => {
   try {
     const { product_id } = req.params;
 
-    const { data: product } = await supabase
+    /* =========================
+       GET PRODUCT
+       ========================= */
+    const { data: product, error: productError } = await supabase
       .from("products")
       .select("*")
       .eq("id", product_id)
       .maybeSingle();
 
-    if (!product) {
-      return res.status(404).json({ error: "Produto não encontrado" });
+    if (productError || !product) {
+      return res.status(404).json({
+        success: false,
+        error: "Produto não encontrado"
+      });
     }
 
-    const { data: upsell } = await supabase
-      .from("products")
-      .select("*")
-      .eq("id", product.upsell_product_id || null)
-      .maybeSingle();
+    /* =========================
+       UPSELLS (FROM PRODUCTS)
+       ========================= */
+    let upsells = [];
+    const productUpsellIds = Array.isArray(product.upsells) ? product.upsells : [];
 
-    const { data: downsell } = await supabase
-      .from("products")
-      .select("*")
-      .eq("id", product.downsell_product_id || null)
-      .maybeSingle();
+    if (productUpsellIds.length > 0) {
+      const { data: upsellData } = await supabase
+        .from("products")
+        .select("*")
+        .in("id", productUpsellIds);
 
-    return res.json({
-      success: true,
-      funnel: {
-        product,
-        upsell: upsell || null,
-        downsell: downsell || null
+      if (upsellData) {
+        upsells = productUpsellIds
+          .map(id => upsellData.find(p => String(p.id) === String(id)))
+          .filter(Boolean);
       }
-    });
+    }
 
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
+    /* =========================
+       DOWNSELLS (FROM PRODUCTS)
+       ========================= */
+    let downsells = [];
+    const productDownsellIds = Array.isArray(product.downsells) ? product.downsells : [];
 
-/* =========================================
-   TRACK FUNNEL CONVERSION
-========================================= */
-router.post("/track", requireAdmin, async (req, res) => {
-  try {
-    const { order_id, step } = req.body;
+    if (productDownsellIds.length > 0) {
+      const { data: downsellData } = await supabase
+        .from("products")
+        .select("*")
+        .in("id", productDownsellIds);
 
-    const { data, error } = await supabase
-      .from("orders")
-      .update({
-        funnel_step: step
-      })
-      .eq("order_id", order_id)
-      .select()
-      .single();
+      if (downsellData) {
+        downsells = productDownsellIds
+          .map(id => downsellData.find(p => String(p.id) === String(id)))
+          .filter(Boolean);
+      }
+    }
 
-    if (error) return res.status(500).json({ error: error.message });
-
+    /* =========================
+       RESPONSE FINAL
+       ========================= */
     return res.json({
       success: true,
-      order: data
+
+      product: {
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+        price: product.price,
+        image: product.image,
+        description: product.description || "",
+        extras: product.extras || []
+      },
+
+      order_bump: null,
+
+      upsells,
+      downsells,
+      
+      upsell: upsells.length > 0 ? upsells[0] : null,
+      downsell: downsells.length > 0 ? downsells[0] : null
     });
 
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error("FUNNEL ERROR:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
   }
 });
 

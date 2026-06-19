@@ -2,14 +2,14 @@ const express = require("express");
 const router = express.Router();
 const supabase = require("../config/supabase");
 
-/* =========================
-   OBTER ORDER POR ORDER_ID
-========================= */
+/* =========================================
+   GET ORDER BY ID
+   ========================================= */
 router.get("/:order_id", async (req, res) => {
   try {
     const { order_id } = req.params;
 
-    const { data, error } = await supabase
+    const { data: order, error } = await supabase
       .from("orders")
       .select("*")
       .eq("order_id", order_id)
@@ -19,23 +19,50 @@ router.get("/:order_id", async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
-    if (!data) {
+    if (!order) {
       return res.status(404).json({ error: "Order não encontrada" });
+    }
+
+    // Dynamic product integration - get delivery info
+    if (order.product_id) {
+      const { data: product } = await supabase
+        .from("products")
+        .select("*")
+        .eq("id", order.product_id)
+        .maybeSingle();
+
+      if (product) {
+        order.product_name = product.name;
+        
+        // Parse delivery info from checkout_description
+        if (product.checkout_description) {
+          try {
+            const delivery = JSON.parse(product.checkout_description);
+            if (delivery.delivery_type === "pdf") {
+              order.pdf_url = delivery.delivery_value;
+            } else if (delivery.delivery_type === "link") {
+              order.links = [delivery.delivery_value];
+            }
+          } catch (e) {
+            console.error("Error parsing product delivery config:", e);
+          }
+        }
+      }
     }
 
     return res.json({
       success: true,
-      order: data,
+      order
     });
+
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 });
 
-/* =========================
-   TRACKING DE ATIVIDADE
-   (RESOLVE O TEU ERRO ATUAL)
-========================= */
+/* =========================================
+   TRACK ACTIVITY (FUNNEL READY)
+   ========================================= */
 router.post("/:order_id/activity", async (req, res) => {
   try {
     const { order_id } = req.params;
@@ -45,39 +72,66 @@ router.post("/:order_id/activity", async (req, res) => {
       return res.status(400).json({ error: "Evento inválido" });
     }
 
-    // 1. buscar order atual
-    const { data: order, error: fetchError } = await supabase
+    const { data: order, error } = await supabase
       .from("orders")
       .select("*")
       .eq("order_id", order_id)
       .maybeSingle();
 
-    if (fetchError || !order) {
+    if (error || !order) {
       return res.status(404).json({ error: "Order não encontrada" });
     }
 
-    // 2. aumentar score de atividade
-    const newScore = (order.activity_score || 0) + 1;
+    const newScore = Number(order.activity_score || 0) + 1;
 
-    const activityEvents = Array.isArray(order.activity_events)
-      ? order.activity_events
-      : [];
+    let events = [];
 
-    activityEvents.push({
+    try {
+      events = Array.isArray(order.activity_events)
+        ? order.activity_events
+        : JSON.parse(order.activity_events || "[]");
+    } catch {
+      events = [];
+    }
+
+    events.push({
       event,
-      time: new Date().toISOString(),
+      time: new Date().toISOString()
     });
 
-    // 3. atualizar order
-    const { data, error: updateError } = await supabase
+    let funnel_step = order.funnel_step || "checkout";
+
+    if (event === "checkout_started") {
+      funnel_step = "checkout";
+    }
+
+    if (event === "upsell_accepted") {
+      if (funnel_step === "checkout") funnel_step = "upsell_1";
+      else if (funnel_step === "upsell_1") funnel_step = "upsell_2";
+      else funnel_step = "success";
+    }
+
+    if (event === "upsell_rejected") {
+      funnel_step = "downsell";
+    }
+
+    if (
+      event === "downsell_accepted" ||
+      event === "downsell_rejected"
+    ) {
+      funnel_step = "success";
+    }
+
+    const { data: updated, error: updateError } = await supabase
       .from("orders")
       .update({
         activity_score: newScore,
         last_activity: event,
-        last_activity_at: new Date(),
-        activity_events: activityEvents,
+        last_activity_at: new Date().toISOString(),
+        activity_events: events,
+        funnel_step
       })
-      .eq("id", order.id)
+      .eq("order_id", order_id)
       .select()
       .single();
 
@@ -88,9 +142,57 @@ router.post("/:order_id/activity", async (req, res) => {
     return res.json({
       success: true,
       activity_score: newScore,
+      funnel_step
     });
+
   } catch (err) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+/* =========================================
+   UPDATE ORDER STATUS (ADMIN)
+   ========================================= */
+router.put("/:order_id/status", async (req, res) => {
+  try {
+    const { order_id } = req.params;
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ success: false, error: "Status é obrigatório" });
+    }
+
+    const updates = {
+      status,
+      last_activity_at: new Date().toISOString()
+    };
+
+    if (status === "paid") {
+      updates.payment_confirmed_at = new Date().toISOString();
+    }
+
+    const { data: order, error } = await supabase
+      .from("orders")
+      .update(updates)
+      .eq("order_id", order_id)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    if (!order) {
+      return res.status(404).json({ success: false, error: "Pedido não encontrado" });
+    }
+
+    return res.json({
+      success: true,
+      message: `Status do pedido atualizado para ${status}`,
+      order
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

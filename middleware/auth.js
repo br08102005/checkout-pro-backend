@@ -19,6 +19,11 @@ function requireAdmin(req, res, next) {
       process.env.JWT_SECRET
     );
 
+    // Verificar se o utilizador tem role de admin
+    if (decoded.role !== "admin") {
+      return res.status(403).json({ error: "Acesso negado. Permissões insuficientes." });
+    }
+
     req.admin = decoded;
 
     next();

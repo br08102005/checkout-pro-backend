@@ -1,25 +1,97 @@
 const express = require("express");
 const router = express.Router();
 const supabase = require("../config/supabase");
+const { requireAdmin } = require("../middleware/auth");
 
-/* =========================
-   CRIAR PRODUTO
-========================= */
-router.post("/create", async (req, res) => {
+// =========================================
+// SLUG GENERATOR
+// =========================================
+function generateSlug(name) {
+  if (!name || typeof name !== "string") {
+    return "produto-" + Date.now();
+  }
+
+  let slug = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/[\s-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return slug || "produto-" + Date.now();
+}
+
+/* =========================================
+   GET ALL PRODUCTS
+========================================= */
+router.get("/", async (req, res) => {
   try {
-    const { name, price, image, description = "", extras = [] } = req.body;
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("active", true)
+      .order("created_at", { ascending: false });
 
-    if (!name || !price) {
-      return res.status(400).json({
-        error: "Nome e preço são obrigatórios"
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true, products: data || [] });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* =========================================
+   GET PRODUCT BY SLUG (🔥 PUBLIC - CHECKOUT)
+========================================= */
+router.get("/slug/:slug", async (req, res) => {
+  try {
+    const { slug } = req.params;
+
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("slug", slug)
+      .eq("active", true)
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        error: "Product not found"
       });
     }
 
-    const slug = name
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, "-")
-      .replace(/[^a-z0-9-]/g, "");
+    return res.json({
+      success: true,
+      product: data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* =========================================
+   CREATE PRODUCT
+========================================= */
+router.post("/create", requireAdmin, async (req, res) => {
+  try {
+    const {
+      name,
+      price,
+      image,
+      description,
+      extras = [],
+      upsell_product_id,
+      downsell_product_id
+    } = req.body;
+
+    if (!name || !price) {
+      return res.status(400).json({ error: "Name and price required" });
+    }
+
+    const slug = generateSlug(name);
 
     const { data, error } = await supabase
       .from("products")
@@ -28,50 +100,74 @@ router.post("/create", async (req, res) => {
           name,
           slug,
           price: Number(price),
-          image: image || null,
+          image,
           description,
           extras,
+          upsells: upsell_product_id ? [upsell_product_id] : [],
+          downsells: downsell_product_id ? [downsell_product_id] : [],
           active: true
         }
       ])
       .select()
       .single();
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
-    }
+    if (error) return res.status(500).json({ success: false, error: error.message });
 
     return res.json({
       success: true,
       product: data,
-      checkout_url: `/checkout.html?product_id=${data.id}`
+      checkout_url: `/p/${data.slug}`
     });
 
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/* =========================
-   LISTAR PRODUTOS
-========================= */
-router.get("/", async (req, res) => {
+/* =========================================
+   DELETE PRODUCT
+========================================= */
+router.delete("/:id", requireAdmin, async (req, res) => {
   try {
+    const { id } = req.params;
+
+    const { error } = await supabase
+      .from("products")
+      .update({ active: false })
+      .eq("id", id);
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* =========================================
+   GET PRODUCT BY ID (ADMIN ONLY / LEGACY)
+   ⚠️ IMPORTANTE: SEMPRE POR ÚLTIMO
+========================================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
     const { data, error } = await supabase
       .from("products")
       .select("*")
-      .order("created_at", { ascending: false });
+      .eq("id", id)
+      .maybeSingle();
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    if (!data) {
+      return res.status(404).json({ error: "Product not found" });
     }
 
-    return res.json({
-      products: data || []
-    });
+    return res.json({ success: true, product: data });
 
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
