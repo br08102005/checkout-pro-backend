@@ -3,27 +3,26 @@ const router = express.Router();
 const supabase = require("../config/supabase");
 const { requireAdmin } = require("../middleware/auth");
 
-// =========================================
-// SLUG GENERATOR
-// =========================================
+/* =========================
+   SLUG GENERATOR
+========================= */
 function generateSlug(name) {
   if (!name || typeof name !== "string") {
     return "produto-" + Date.now();
   }
 
-  let slug = name
+  return name
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/[\s-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return slug || "produto-" + Date.now();
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "produto-" + Date.now();
 }
 
-/* =========================================
+/* =========================
    GET ALL PRODUCTS
-========================================= */
+========================= */
 router.get("/", async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -32,17 +31,22 @@ router.get("/", async (req, res) => {
       .eq("active", true)
       .order("created_at", { ascending: false });
 
-    if (error) return res.status(500).json({ success: false, error: error.message });
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
 
-    return res.json({ success: true, products: data || [] });
+    return res.json({
+      success: true,
+      products: data || []
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/* =========================================
-   GET PRODUCT BY SLUG (🔥 PUBLIC - CHECKOUT)
-========================================= */
+/* =========================
+   GET BY SLUG (CHECKOUT)
+========================= */
 router.get("/slug/:slug", async (req, res) => {
   try {
     const { slug } = req.params;
@@ -54,12 +58,14 @@ router.get("/slug/:slug", async (req, res) => {
       .eq("active", true)
       .maybeSingle();
 
-    if (error) return res.status(500).json({ success: false, error: error.message });
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
 
     if (!data) {
       return res.status(404).json({
         success: false,
-        error: "Product not found"
+        error: "Produto não encontrado"
       });
     }
 
@@ -72,23 +78,18 @@ router.get("/slug/:slug", async (req, res) => {
   }
 });
 
-/* =========================================
+/* =========================
    CREATE PRODUCT
-========================================= */
+========================= */
 router.post("/create", requireAdmin, async (req, res) => {
   try {
-    const {
-      name,
-      price,
-      image,
-      description,
-      extras = [],
-      upsell_product_id,
-      downsell_product_id
-    } = req.body;
+    const { name, price, image, description, extras = [] } = req.body;
 
     if (!name || !price) {
-      return res.status(400).json({ error: "Name and price required" });
+      return res.status(400).json({
+        success: false,
+        error: "Name and price required"
+      });
     }
 
     const slug = generateSlug(name);
@@ -103,15 +104,15 @@ router.post("/create", requireAdmin, async (req, res) => {
           image,
           description,
           extras,
-          upsells: upsell_product_id ? [upsell_product_id] : [],
-          downsells: downsell_product_id ? [downsell_product_id] : [],
           active: true
         }
       ])
       .select()
       .single();
 
-    if (error) return res.status(500).json({ success: false, error: error.message });
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
 
     return res.json({
       success: true,
@@ -124,9 +125,9 @@ router.post("/create", requireAdmin, async (req, res) => {
   }
 });
 
-/* =========================================
-   DELETE PRODUCT
-========================================= */
+/* =========================
+   DELETE (SOFT)
+========================= */
 router.delete("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -136,7 +137,9 @@ router.delete("/:id", requireAdmin, async (req, res) => {
       .update({ active: false })
       .eq("id", id);
 
-    if (error) return res.status(500).json({ success: false, error: error.message });
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
 
     return res.json({ success: true });
   } catch (err) {
@@ -144,10 +147,9 @@ router.delete("/:id", requireAdmin, async (req, res) => {
   }
 });
 
-/* =========================================
-   GET PRODUCT BY ID (ADMIN ONLY / LEGACY)
-   ⚠️ IMPORTANTE: SEMPRE POR ÚLTIMO
-========================================= */
+/* =========================
+   GET BY ID (LEGACY)
+========================= */
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -158,13 +160,21 @@ router.get("/:id", async (req, res) => {
       .eq("id", id)
       .maybeSingle();
 
-    if (error) return res.status(500).json({ success: false, error: error.message });
-
-    if (!data) {
-      return res.status(404).json({ error: "Product not found" });
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
     }
 
-    return res.json({ success: true, product: data });
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        error: "Produto não encontrado"
+      });
+    }
+
+    return res.json({
+      success: true,
+      product: data
+    });
 
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
